@@ -1,6 +1,6 @@
 package dmx
 
 type Binding struct {
-	Universe int
+	Universe Universe
 	Driver   Driver
 }

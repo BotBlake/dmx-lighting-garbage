@@ -16,3 +16,9 @@ func (r *Registry) Get(name string) (*Instance, bool) {
 	d, ok := r.devices[name]
 	return d, ok
 }
+
+func (r *Registry) ForEach(fn func(*Instance)) {
+	for _, d := range r.devices {
+		fn(d)
+	}
+}

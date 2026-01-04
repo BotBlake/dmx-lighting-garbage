@@ -63,13 +63,10 @@ func main() {
 	fmt.Print("Bind this device to universe: ")
 	line, _ = reader.ReadString('\n')
 	universeID, _ := strconv.Atoi(strings.TrimSpace(line))
-
-	universes := map[int]*dmx.Universe{
-		universeID: dmx.NewUniverse(universeID),
-	}
+	universe := dmx.NewUniverse(universeID)
 
 	binding := dmx.Binding{
-		Universe: universeID,
+		Universe: *universe,
 		Driver:   driver,
 	}
 
@@ -77,8 +74,10 @@ func main() {
 	ClearScreen()
 	fmt.Println("Welcome to DLG (DmxLightingGarbage)")
 
-	engine := dmx.NewEngine([]dmx.Binding{binding}, 25)
-	go engine.Run(universes)
+	engine := dmx.NewEngine(25)
+	go engine.Run()
+	engine.AddUniverse(universeID, universe)
+	engine.AddBinding(binding)
 
 	// Load DDF profiles
 	profiles, err := device.LoadProfiles("./ddf")
@@ -96,7 +95,6 @@ func main() {
 		cmd, _ := reader.ReadString('\n')
 		if handleCommand(
 			strings.TrimSpace(cmd),
-			universes,
 			engine,
 			profiles,
 			devices,
@@ -109,7 +107,6 @@ func main() {
 
 func handleCommand(
 	cmd string,
-	universes map[int]*dmx.Universe,
 	engine *dmx.Engine,
 	profiles map[string]*device.DDFDevice,
 	devices *device.Registry,
@@ -155,21 +152,19 @@ func handleCommand(
 			return false
 		}
 
-		if _, ok := universes[u]; !ok {
-			universes[u] = dmx.NewUniverse(u)
-		}
-
-		universes[u].Frame[ch] = byte(val)
+		engine.SetChannel(u, ch, byte(val))
 		fmt.Printf("Universe %d Channel %d = %d\n", u, ch, val)
 		return false
 
 	case "get":
 		if len(parts) == 2 && parts[1] == "all" {
-			for u, uni := range universes {
+			var outputs = engine.GetOutputs()
+			fmt.Println("Current DMX Outputs:")
+			for u, frame := range outputs {
 				fmt.Printf("Universe %d:\n", u)
 				for i := 1; i <= 512; i++ {
-					if uni.Frame[i] != 0 {
-						fmt.Printf("  CH %d = %d\n", i, uni.Frame[i])
+					if frame[i] != 0 {
+						fmt.Printf("  CH %d = %d\n", i, frame[i])
 					}
 				}
 			}
@@ -177,11 +172,7 @@ func handleCommand(
 		return false
 
 	case "clear":
-		for _, uni := range universes {
-			for i := 1; i <= 512; i++ {
-				uni.Frame[i] = 0
-			}
-		}
+		engine.Clear()
 		fmt.Println("All channels cleared")
 		return false
 
@@ -229,10 +220,6 @@ func handleCommand(
 			line, _ = reader.ReadString('\n')
 			u, _ := strconv.Atoi(strings.TrimSpace(line))
 
-			if _, ok := universes[u]; !ok {
-				universes[u] = dmx.NewUniverse(u)
-			}
-
 			fmt.Print("DMX start address (1–512): ")
 			line, _ = reader.ReadString('\n')
 			addr, _ := strconv.Atoi(strings.TrimSpace(line))
@@ -243,10 +230,10 @@ func handleCommand(
 			}
 
 			dev := &device.Instance{
-				Name:     name,
-				Profile:  profile,
-				Universe: universes[u],
-				Address:  addr,
+				Name:       name,
+				Profile:    profile,
+				UniverseID: u,
+				Address:    addr,
 			}
 
 			devices.Add(dev)
@@ -283,11 +270,11 @@ func handleCommand(
 					fmt.Println("Brightness must be 0–100")
 					return false
 				}
-				dev.SetBrightness(v)
+				engine.Queue(dev.SetBrightness(v))
 				fmt.Printf("Set %s brightness to %d%%\n", devName, v)
 
 			case "color":
-				dev.SetColor(value)
+				engine.Queue(dev.SetColor(value))
 				fmt.Printf("Set %s color to %s\n", devName, value)
 
 			default:
